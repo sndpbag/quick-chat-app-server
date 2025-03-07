@@ -8,6 +8,7 @@ const bcrypt = require("bcryptjs");
 const cors = require("cors");
 const { Server } = require("socket.io");
 const http = require("http");
+const rateLimit = require("express-rate-limit");
  
 
 
@@ -87,20 +88,41 @@ app.post("/signup", async (req, res) => {
 });
 
 
-//  uer login
-app.post("/login", async (req, res) => {
-    const { email, password } = req.body;
-    
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ error: "User not found!" });
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ error: "Incorrect password!" });
-
- 
-    res.json({ fullName: user.fullName });
+// Rate Limiting Middleware (Login Brute-force Attack Protection)
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 মিনিটের সময়সীমা
+    max: 5, // ৫ বার ভুল পাসওয়ার্ড দিলে ব্লক করবে
+    message: { error: "Too many login attempts. Please try again later." },
+    standardHeaders: true, 
+    legacyHeaders: false, 
 });
 
+
+
+// Login Route with Rate Limiting
+app.post("/login", loginLimiter, async (req, res) => {
+    const { email, password } = req.body;
+    
+    try {
+        // Check if user exists
+        const user = await User.findOne({ email });
+        if (!user) return res.status(400).json({ error: "User not found!" });
+
+        // Validate password
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) return res.status(400).json({ error: "Incorrect password!" });
+
+        // Update socket ID (if needed for chat system)
+        user.socketId = req.body.socketId || null;
+        await user.save();
+
+        res.json({ fullName: user.fullName, socketId: user.socketId });
+
+    } catch (error) {
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
 
 
 
